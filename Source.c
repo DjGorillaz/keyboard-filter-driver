@@ -24,12 +24,14 @@ typedef struct _DEVICE_EXTENSION { PDEVICE_OBJECT pKeyboardDevice;
 									} DEVICE_EXTENSION, *PDEVICE_EXTENSION;
 */
 
-typedef struct _KEYBOARD_INPUT_DATA { USHORT UnitId;
-										USHORT MakeCode;
-										USHORT Flags;
-										USHORT Reserved;
-										ULONG ExtraInformation;
-										} KEYBOARD_INPUT_DATA, *PKEYBOARD_INPUT_DATA;
+//Структура соответствует нажатой клавише
+typedef struct _KEYBOARD_INPUT_DATA { 
+									USHORT UnitId;
+									USHORT MakeCode;
+									USHORT Flags;
+									USHORT Reserved;
+									ULONG ExtraInformation;
+									} KEYBOARD_INPUT_DATA, *PKEYBOARD_INPUT_DATA;
 
 
 typedef struct _DEVICE_EXTENSION {
@@ -44,23 +46,27 @@ NTSTATUS ReadCompleted(PDEVICE_OBJECT pDeviceObject, PIRP pIrp, PVOID Context)
 
 	PKEYBOARD_INPUT_DATA keys;
 
+	//Проверка завершения запроса
 	if (pIrp->IoStatus.Status == STATUS_SUCCESS)
 	{
 		keys = (PKEYBOARD_INPUT_DATA)pIrp->AssociatedIrp.SystemBuffer;
+		//Получаем количество букв
 		int nKeys = pIrp->IoStatus.Information / sizeof(KEYBOARD_INPUT_DATA);
 
+		//Вывод каждой
 		for (int i = 0; i < nKeys; ++i)
 		{
 			DbgPrint("Code: %x\n", keys[i].MakeCode);
 		}
 	}
 
+	//Если IRP задержан
 	if (pIrp->PendingReturned)
 	{
 		IoMarkIrpPending(pIrp);
 		InterlockedDecrement64(&REQUESTS);
 	}
-		
+
 	return pIrp->IoStatus.Status;
 
 }
@@ -73,72 +79,81 @@ NTSTATUS DispatchSkip(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
 	return IoCallDriver(((PDEVICE_EXTENSION)pDeviceObject->DeviceExtension)->pKeyboardDevice, pIrp);
 }
 
+//Обработка запросов на чтение
 NTSTATUS DispatchRead(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
 {
-	InterlockedIncrement64(&REQUESTS);
-
 	//Настраиваем указатель стека для нижележащего драйвера
 	IoCopyCurrentIrpStackLocationToNext(pIrp);
 
 	//По выполнении запроса вызываем указанную функцию
 	IoSetCompletionRoutine(pIrp, ReadCompleted, pDeviceObject, TRUE, TRUE, TRUE);
 
+	InterlockedIncrement64(&REQUESTS);
+
 	//Передаём IRP следующему драйверу
 	return IoCallDriver(((PDEVICE_EXTENSION)pDeviceObject->DeviceExtension)->pKeyboardDevice, pIrp);
 
 }
 
-VOID Unload(PDRIVER_OBJECT pDriverObject)
+
+//Функция выгрузки драйвера
+VOID Unload(PDRIVER_OBJECT pDriverObject) 
 {
-	DbgPrint("entering unload\n");
+	//Получаем указатель на PDEVICE_EXTENSION
 	PDEVICE_EXTENSION pKeyboardDeviceExtension = (PDEVICE_EXTENSION)pDriverObject->DeviceObject->DeviceExtension;
 
+	//Убираем устройство из стэка
 	IoDetachDevice(pKeyboardDeviceExtension->pKeyboardDevice);
 	
+	//Ожидаем, пока закончатся все IRP пакеты
 	if (REQUESTS != 0)
 	{
 		DbgPrint("Waiting timer\n");
-		KTIMER ktTimer;
-		LARGE_INTEGER liTimeout;
-		liTimeout.QuadPart = 1000000;
-		KeInitializeTimer(&ktTimer);
+		KTIMER timer;
+		LARGE_INTEGER timeout;
+		timeout.QuadPart = 1000000; // 0,1 c
+		KeInitializeTimer(&timer);
 
 		while (REQUESTS > 0)
 		{
-			KeSetTimer(&ktTimer, liTimeout, NULL);
-			KeWaitForSingleObject(&ktTimer, Executive, KernelMode, FALSE, NULL);
+			KeSetTimer(&timer, timeout, NULL);
+			KeWaitForSingleObject(&timer, Executive, KernelMode, FALSE, NULL);
 		}
-		DbgPrint("Delete device\n");
 	}
 	
+	//Удаляем устройство
 	IoDeleteDevice(pDriverObject->DeviceObject);
 	return;
 }
 
-NTSTATUS KeyboardFilter(PDRIVER_OBJECT pDriverObject)
+//Установка фильтра
+NTSTATUS KeyboardFilter(PDRIVER_OBJECT pDriverObject) 
 {
-	//DbgPrint("entering kbd filted\n");
-	//фильтр объекта устройства
+	//Объект устройства
 	PDEVICE_OBJECT pKeyboardDeviceObject;
 	NTSTATUS NtStatus = 0;
 
-	//Создаём объект драйвера (Device object) 
+	//Создаём объект устройства (Driver object) 
 	NtStatus = IoCreateDevice(pDriverObject,
 		sizeof(DEVICE_EXTENSION),
 		NULL,
-		FILE_DEVICE_KEYBOARD,
+		FILE_DEVICE_KEYBOARD,	//Тип устройства
 		0,
 		TRUE, //FALSE
-		&pKeyboardDeviceObject); //&
+		&pKeyboardDeviceObject);
 
+	//Устройство создано
 	if (NtStatus == STATUS_SUCCESS)
 	{
+		//Установка флагов
 		pKeyboardDeviceObject->Flags |= (DO_BUFFERED_IO | DO_POWER_PAGABLE);
 		pKeyboardDeviceObject->Flags &= (~DO_DEVICE_INITIALIZING);
 
+		//Обнуляем струтуру DeviceExtension
 		RtlZeroMemory(pKeyboardDeviceObject->DeviceExtension, sizeof(DEVICE_EXTENSION));
 		PDEVICE_EXTENSION pKeyboardDeviceExtension = (PDEVICE_EXTENSION)pKeyboardDeviceObject->DeviceExtension;
 
+		//Преобразование имени устройства
 		CCHAR cName[40] = "\\Device\\KeyboardClass0";
 		STRING strName;
 		UNICODE_STRING ustrDeviceName;
@@ -146,13 +161,16 @@ NTSTATUS KeyboardFilter(PDRIVER_OBJECT pDriverObject)
 		RtlInitAnsiString(&strName, cName);
 		RtlAnsiStringToUnicodeString(&ustrDeviceName, &strName, TRUE);
 
+		//Добавляем устройство в стек
+		//В &pKeyboardDeviceExtension->pKeyboardDevice хранится адрес нижележащего устройства
 		IoAttachDevice(pKeyboardDeviceObject, &ustrDeviceName, &pKeyboardDeviceExtension->pKeyboardDevice);
+		//Освобождаем место, выделенное под строку
 		RtlFreeUnicodeString(&ustrDeviceName);		
-		DbgPrint("Keyboard installed");
+		DbgPrint("Keyboard filter installed\n");
 	}
 	else
 	{
-		DbgPrint("Installing keyboard filter error");
+		DbgPrint("Installing keyboard filter error\n");
 	}
 
 	return NtStatus;
@@ -164,12 +182,9 @@ NTSTATUS KeyboardFilter(PDRIVER_OBJECT pDriverObject)
 //PUNICODE_STRING - путь в реестре к подразделу драйвера
 NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING pRegistryPath)
 {
-	//DbgPrint("driver loaded\n");
 	REQUESTS = 0;
 	NTSTATUS NtStatus = 0; //STATUS_SUCCESS;
 	unsigned int uiIndex = 0;
-
-	//DbgPrint("Entry points...\n");
 
 	//Регистрация драйвером точек входа в свои рабочие процедуры
 	for (uiIndex = 0; uiIndex < IRP_MJ_MAXIMUM_FUNCTION; ++uiIndex)
@@ -184,7 +199,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING pRegistryPath
 	//Помещаем наше устройство в стэк
 	NtStatus = KeyboardFilter(pDriverObject);
 
-	//Функция выгрузки
+	//Функция выгрузки драйвера из памяти
 	pDriverObject->DriverUnload = Unload;
 
 	return NtStatus;
